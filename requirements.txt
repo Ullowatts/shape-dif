@@ -1,6 +1,7 @@
 Flask
-tensorflow==2.15
+tensorflow==2.19
 numpy
 opencv-python-headless
 google-cloud-storage
 gunicorn
+
