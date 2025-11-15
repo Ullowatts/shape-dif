@@ -16,7 +16,7 @@ app = Flask(__name__)
 
 # CONFIG
 BUCKET_NAME = "shape-classifier-bucket"   # <-- tu bucket
-MODEL_PATH = "shapes_model.keras"         # <-- tu archivo en el bucket
+MODEL_PATH = "shapes_model.h5"         # <-- tu archivo en el bucket
 
 model = None  # se cargará bajo demanda
 class_names = ["circle", "square", "triangle"]
@@ -102,5 +102,6 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     logging.info(f"Iniciando servidor local en puerto {port}...")
     app.run(host="0.0.0.0", port=port)
+
 
 
