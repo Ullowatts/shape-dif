@@ -78,9 +78,13 @@ def predict():
     # Procesar imagen
     try:
         npimg = np.frombuffer(img_bytes, np.uint8)
-        img = cv2.imdecode(npimg, cv2.IMREAD_GRAYSCALE)
+        # Leer en color (BGR) y luego convertimos a RGB
+        img = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
         img = cv2.resize(img, (128, 128))
-        img = img.reshape(1, 128, 128, 1) / 255.0
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+        img = img.astype("float32") / 255.0
+        img = img.reshape(1, 128, 128, 3)
     except Exception as e:
         logging.error(f"Error procesando imagen: {e}")
         return jsonify({"error": "Invalid image", "details": str(e)}), 400
@@ -102,6 +106,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     logging.info(f"Iniciando servidor local en puerto {port}...")
     app.run(host="0.0.0.0", port=port)
+
 
 
 
