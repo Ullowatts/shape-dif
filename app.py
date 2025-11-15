@@ -8,17 +8,21 @@ import tensorflow as tf
 import numpy as np
 import cv2
 
-# Logs
+# -------------------------
+# LOGGING
+# -------------------------
 logging.getLogger().setLevel(logging.INFO)
 logging.info("Iniciando aplicación Flask...")
 
 app = Flask(__name__)
 
+# -------------------------
 # CONFIG
+# -------------------------
 BUCKET_NAME = "shape-classifier-bucket"   # <-- tu bucket
-MODEL_PATH = "shapes_model.h5"         # <-- tu archivo en el bucket
+MODEL_PATH = "shapes_model.h5"            # <-- tu archivo en el bucket (IMPORTANTE)
 
-model = None  # se cargará bajo demanda
+model = None
 class_names = ["circle", "square", "triangle"]
 
 
@@ -26,9 +30,11 @@ def load_model_from_gcs():
     """Descarga el modelo desde GCS a /tmp y lo carga con Keras."""
     global model
     if model is not None:
+        logging.info("Modelo ya estaba cargado en memoria, reutilizando.")
         return model
 
-    logging.info("Cargando modelo desde GCS...")
+    logging.info(f"Cargando modelo desde GCS: bucket={BUCKET_NAME}, path={MODEL_PATH}")
+
     client = storage.Client()
     bucket = client.bucket(BUCKET_NAME)
     blob = bucket.blob(MODEL_PATH)
@@ -38,14 +44,14 @@ def load_model_from_gcs():
         logging.error(msg)
         raise FileNotFoundError(msg)
 
-    # Crear archivo temporal en /tmp
-    fd, temp_path = tempfile.mkstemp(suffix=".keras", dir="/tmp")
+    # Archivo temporal con extensión .h5 (MUY IMPORTANTE)
+    fd, temp_path = tempfile.mkstemp(suffix=".h5", dir="/tmp")
     os.close(fd)
 
     logging.info(f"Descargando modelo a {temp_path} ...")
     blob.download_to_filename(temp_path)
-
     logging.info("Descarga completada, cargando modelo con tf.keras.models.load_model...")
+
     model = tf.keras.models.load_model(temp_path)
     logging.info("Modelo cargado correctamente.")
 
@@ -75,13 +81,12 @@ def predict():
     file = request.files["file"]
     img_bytes = file.read()
 
-    # Procesar imagen
+    # Procesar imagen: 128x128x3 RGB (lo que espera el modelo)
     try:
         npimg = np.frombuffer(img_bytes, np.uint8)
-        # Leer en color (BGR) y luego convertimos a RGB
-        img = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
+        img = cv2.imdecode(npimg, cv2.IMREAD_COLOR)  # BGR
         img = cv2.resize(img, (128, 128))
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)   # a RGB
 
         img = img.astype("float32") / 255.0
         img = img.reshape(1, 128, 128, 3)
@@ -99,13 +104,19 @@ def predict():
         logging.error(f"Error durante la predicción: {e}")
         return jsonify({"error": "Prediction failed", "details": str(e)}), 500
 
-    return jsonify({"shape": shape, "confidence": confidence})
+    logging.info(f"Predicción: {shape} (confianza={confidence:.4f})")
+
+    return jsonify({
+        "shape": shape,
+        "confidence": confidence
+    })
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     logging.info(f"Iniciando servidor local en puerto {port}...")
     app.run(host="0.0.0.0", port=port)
+
 
 
 
