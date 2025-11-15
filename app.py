@@ -1,22 +1,106 @@
-from flask import Flask
 import os
 import logging
+import tempfile
 
+from flask import Flask, request, jsonify
+from google.cloud import storage
+import tensorflow as tf
+import numpy as np
+import cv2
+
+# Logs
 logging.getLogger().setLevel(logging.INFO)
-logging.info("Arrancando app mínima...")
+logging.info("Iniciando aplicación Flask...")
 
 app = Flask(__name__)
 
+# CONFIG
+BUCKET_NAME = "shape-classifier-bucket"   # <-- tu bucket
+MODEL_PATH = "shapes_model.keras"         # <-- tu archivo en el bucket
+
+model = None  # se cargará bajo demanda
+class_names = ["circle", "square", "triangle"]
+
+
+def load_model_from_gcs():
+    """Descarga el modelo desde GCS a /tmp y lo carga con Keras."""
+    global model
+    if model is not None:
+        return model
+
+    logging.info("Cargando modelo desde GCS...")
+    client = storage.Client()
+    bucket = client.bucket(BUCKET_NAME)
+    blob = bucket.blob(MODEL_PATH)
+
+    if not blob.exists():
+        msg = f"El archivo {MODEL_PATH} no existe en el bucket {BUCKET_NAME}"
+        logging.error(msg)
+        raise FileNotFoundError(msg)
+
+    # Crear archivo temporal en /tmp
+    fd, temp_path = tempfile.mkstemp(suffix=".keras", dir="/tmp")
+    os.close(fd)
+
+    logging.info(f"Descargando modelo a {temp_path} ...")
+    blob.download_to_filename(temp_path)
+
+    logging.info("Descarga completada, cargando modelo con tf.keras.models.load_model...")
+    model = tf.keras.models.load_model(temp_path)
+    logging.info("Modelo cargado correctamente.")
+
+    return model
+
+
 @app.route("/", methods=["GET"])
-def index():
-    logging.info("Petición a '/' recibida")
-    return "Hola desde Cloud Run (API mínima)!", 200
+def root():
+    logging.info("Health check en '/'")
+    return "OK - Shape API funcionando", 200
+
+
+@app.route("/predict", methods=["POST"])
+def predict():
+    logging.info("Petición recibida en /predict")
+
+    # Cargar modelo lazy
+    try:
+        clf = load_model_from_gcs()
+    except Exception as e:
+        logging.error(f"Error cargando el modelo: {e}")
+        return jsonify({"error": "No se pudo cargar el modelo", "details": str(e)}), 500
+
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    file = request.files["file"]
+    img_bytes = file.read()
+
+    # Procesar imagen
+    try:
+        npimg = np.frombuffer(img_bytes, np.uint8)
+        img = cv2.imdecode(npimg, cv2.IMREAD_GRAYSCALE)
+        img = cv2.resize(img, (128, 128))
+        img = img.reshape(1, 128, 128, 1) / 255.0
+    except Exception as e:
+        logging.error(f"Error procesando imagen: {e}")
+        return jsonify({"error": "Invalid image", "details": str(e)}), 400
+
+    # Predicción
+    try:
+        preds = clf.predict(img)
+        idx = int(np.argmax(preds))
+        confidence = float(np.max(preds))
+        shape = class_names[idx]
+    except Exception as e:
+        logging.error(f"Error durante la predicción: {e}")
+        return jsonify({"error": "Prediction failed", "details": str(e)}), 500
+
+    return jsonify({"shape": shape, "confidence": confidence})
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     logging.info(f"Iniciando servidor local en puerto {port}...")
     app.run(host="0.0.0.0", port=port)
-
-
 
 
